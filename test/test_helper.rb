@@ -39,19 +39,24 @@ module Proxy::IntegrationTestCase
   end
 
   def launch(protocol: 'https', plugins: [], settings: {})
-    port = 1024 + rand(63_000)
+    port = 0
     @settings = Proxy::Settings::Global.new(settings.merge("#{protocol}_port" => port))
     @t = Thread.new do
       launcher = Proxy::Launcher.new(@settings)
       app = launcher.public_send("#{protocol}_app", port, plugins)
-      launcher.webrick_server(app.merge(AccessLog: [Logger.new('/dev/null')]), ['localhost'], port).start
+      server = launcher.webrick_server(app.merge(AccessLog: [Logger.new('/dev/null')]), ['localhost'], port)
+      # Read back the actual port it bound to
+      @settings["#{protocol}_port"] = server.listeners[0].addr[1]
+      server.start
     end
     Timeout.timeout(2) do
-      sleep(0.1) until can_connect?('localhost', @settings.send("#{protocol}_port"))
+      sleep(0.1) until can_connect?('localhost', @settings["#{protocol}_port"])
     end
   end
 
   def can_connect?(host, port)
+    return false if port == 0
+
     TCPSocket.new(host, port).close
     true
   rescue Errno::ECONNREFUSED, Errno::EHOSTUNREACH
